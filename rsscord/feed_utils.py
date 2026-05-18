@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 import feedparser
 
@@ -55,6 +56,27 @@ def derive_entry_description(entry: dict[str, Any]) -> str | None:
     if description:
         description = str(description).strip()
     return description or None
+
+
+def derive_entry_thumbnail_url(entry: dict[str, Any]) -> str | None:
+    media_thumbnails = entry.get("media_thumbnail")
+    if isinstance(media_thumbnails, list):
+        for item in media_thumbnails:
+            if isinstance(item, dict):
+                url = item.get("url")
+                if isinstance(url, str) and url.strip():
+                    return url.strip()
+    return None
+
+
+def is_youtube_url(url: str | None) -> bool:
+    if not url or not isinstance(url, str):
+        return False
+    hostname = urlparse(url).hostname
+    if not hostname:
+        return False
+    normalized = hostname.lower()
+    return normalized in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
 
 
 def is_short_entry(entry: dict[str, Any]) -> bool:

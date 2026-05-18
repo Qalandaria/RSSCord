@@ -2,13 +2,20 @@ import asyncio
 import logging
 from calendar import timegm
 from typing import Any
+from urllib.parse import urlparse
 
 import discord
 import feedparser
 from discord.ext import commands, tasks
 
 from .config import Settings
-from .feed_utils import derive_entry_description, derive_feed_description, is_short_entry
+from .feed_utils import (
+    derive_entry_description,
+    derive_entry_thumbnail_url,
+    derive_feed_description,
+    is_short_entry,
+    is_youtube_url,
+)
 from .resolver import FeedResolver
 from .store import FeedStore
 
@@ -73,9 +80,7 @@ class RSSCordBot(commands.Bot):
 
             visible_entries = [entry for entry in new_entries if self.should_show_entry(is_short_entry(entry))]
             for entry in self.select_entries_for_announcement(visible_entries):
-                title = entry.get("title", "Untitled entry")
-                link = entry.get("link", feed.resolved_url)
-                await channel.send(f"**{feed.title or 'Feed'}**\n{title}\n{link}")
+                await self.send_entry(channel, entry, feed_title=feed.title, fallback_url=feed.resolved_url)
 
     @feed_poll_loop.before_loop
     async def before_feed_poll_loop(self) -> None:
@@ -112,6 +117,7 @@ class RSSCordBot(commands.Bot):
                 entry_key,
                 entry.get("title"),
                 derive_entry_description(entry),
+                derive_entry_thumbnail_url(entry),
                 entry.get("link"),
                 published_at,
                 is_short=is_short_entry(entry),
@@ -205,6 +211,138 @@ class RSSCordBot(commands.Bot):
             except ValueError:
                 return 0.0
         return 0.0
+
+    @staticmethod
+    def entry_value(entry: Any, key: str) -> Any:
+        if isinstance(entry, dict):
+            return entry.get(key)
+        return getattr(entry, key, None)
+
+    @classmethod
+    def entry_link(cls, entry: Any, fallback_url: str | None = None) -> str | None:
+        value = cls.entry_value(entry, "link")
+        if value is None:
+            value = cls.entry_value(entry, "entry_link")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(fallback_url, str) and fallback_url.strip():
+            return fallback_url.strip()
+        return None
+
+    @classmethod
+    def entry_title(cls, entry: Any) -> str | None:
+        value = cls.entry_value(entry, "title")
+        if value is None:
+            value = cls.entry_value(entry, "entry_title")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
+    @classmethod
+    def entry_description(cls, entry: Any) -> str | None:
+        if isinstance(entry, dict):
+            return derive_entry_description(entry)
+        value = cls.entry_value(entry, "entry_description")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
+    @classmethod
+    def entry_thumbnail_url(cls, entry: Any) -> str | None:
+        if isinstance(entry, dict):
+            return derive_entry_thumbnail_url(entry)
+        value = cls.entry_value(entry, "entry_thumbnail_url")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
+    @classmethod
+    def entry_when(cls, entry: Any) -> str | None:
+        value = cls.entry_value(entry, "published_at")
+        if not value:
+            value = cls.entry_value(entry, "seen_at")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
+    @classmethod
+    def entry_feed_title(cls, entry: Any) -> str | None:
+        value = cls.entry_value(entry, "feed_title")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
+    @classmethod
+    def build_entry_embed(
+        cls,
+        feed_title: str | None,
+        entry: Any,
+        fallback_url: str | None,
+    ) -> discord.Embed | None:
+        link = cls.entry_link(entry, fallback_url)
+        if not isinstance(link, str) or not link.strip():
+            return None
+
+        title = cls.entry_title(entry)
+        if not isinstance(title, str) or not title.strip():
+            hostname = urlparse(link).hostname
+            title = feed_title or hostname or "Open item"
+
+        description = cls.entry_description(entry)
+        embed = discord.Embed(
+            title=title.strip()[:256],
+            url=link,
+            description=description[:4096] if isinstance(description, str) else None,
+        )
+        if feed_title:
+            embed.set_author(name=feed_title[:256])
+
+        thumbnail_url = cls.entry_thumbnail_url(entry)
+        if thumbnail_url:
+            embed.set_image(url=thumbnail_url)
+        when = cls.entry_when(entry)
+        if when:
+            embed.set_footer(text=when[:2048])
+        return embed
+
+    @classmethod
+    def build_entry_text(
+        cls,
+        feed_title: str | None,
+        entry: Any,
+        fallback_url: str | None,
+    ) -> str:
+        title = cls.entry_title(entry) or "Untitled entry"
+        link = cls.entry_link(entry, fallback_url)
+        when = cls.entry_when(entry)
+        lines = []
+        if feed_title:
+            lines.append(f"**{feed_title}**")
+        lines.append(title)
+        if when:
+            lines.append(when)
+        if link:
+            lines.append(link)
+        return "\n".join(lines)
+
+    async def send_entry(
+        self,
+        destination: Any,
+        entry: Any,
+        feed_title: str | None = None,
+        fallback_url: str | None = None,
+    ) -> None:
+        resolved_feed_title = feed_title or self.entry_feed_title(entry)
+        link = self.entry_link(entry, fallback_url)
+        if is_youtube_url(link):
+            await destination.send(self.build_entry_text(resolved_feed_title, entry, fallback_url))
+            return
+
+        embed = self.build_entry_embed(resolved_feed_title, entry, fallback_url)
+        if embed is not None:
+            await destination.send(embed=embed)
+            return
+        await destination.send(self.build_entry_text(resolved_feed_title, entry, fallback_url))
 
     def shorts_enabled(self) -> bool:
         return self.store.get_bool_setting("shorts", default=False)

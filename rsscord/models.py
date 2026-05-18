@@ -17,6 +17,7 @@ class FeedRecord:
 class EntryRecord:
     entry_title: str | None
     entry_description: str | None
+    entry_thumbnail_url: str | None
     entry_link: str | None
     published_at: str | None
     seen_at: str
@@ -29,6 +30,7 @@ class SearchResultRecord:
     feed_title: str | None
     entry_title: str | None
     entry_description: str | None
+    entry_thumbnail_url: str | None
     entry_link: str | None
     published_at: str | None
     seen_at: str

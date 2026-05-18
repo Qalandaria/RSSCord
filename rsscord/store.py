@@ -64,6 +64,8 @@ class FeedStore:
             }
             if "entry_description" not in entry_columns:
                 connection.execute("ALTER TABLE entries ADD COLUMN entry_description TEXT")
+            if "entry_thumbnail_url" not in entry_columns:
+                connection.execute("ALTER TABLE entries ADD COLUMN entry_thumbnail_url TEXT")
             if "is_short" not in entry_columns:
                 connection.execute("ALTER TABLE entries ADD COLUMN is_short INTEGER NOT NULL DEFAULT 0")
             connection.execute(
@@ -116,7 +118,7 @@ class FeedStore:
     def recent_entries(self, feed_id: int, limit: int = 3, include_shorts: bool = True) -> list[EntryRecord]:
         with closing(self._connect()) as connection:
             query = [
-                "SELECT entry_title, entry_description, entry_link, published_at, seen_at, is_short",
+                "SELECT entry_title, entry_description, entry_thumbnail_url, entry_link, published_at, seen_at, is_short",
                 "FROM entries",
                 "WHERE feed_id = ?",
             ]
@@ -238,6 +240,7 @@ class FeedStore:
         entry_key: str,
         entry_title: str | None,
         entry_description: str | None,
+        entry_thumbnail_url: str | None,
         entry_link: str | None,
         published_at: str | None,
         is_short: bool = False,
@@ -250,17 +253,19 @@ class FeedStore:
                     entry_key,
                     entry_title,
                     entry_description,
+                    entry_thumbnail_url,
                     entry_link,
                     published_at,
                     is_short,
                     seen_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     feed_id,
                     entry_key,
                     entry_title,
                     entry_description,
+                    entry_thumbnail_url,
                     entry_link,
                     published_at,
                     int(is_short),
@@ -300,6 +305,7 @@ class FeedStore:
             "    f.title AS feed_title,",
             "    e.entry_title,",
             "    e.entry_description,",
+            "    e.entry_thumbnail_url,",
             "    e.entry_link,",
             "    e.published_at,",
             "    e.seen_at,",

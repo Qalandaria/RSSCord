@@ -19,14 +19,6 @@ def register_commands(bot: RSSCordBot, settings: Settings) -> None:
     def shorts_enabled() -> bool:
         return bot.store.get_bool_setting("shorts", default=False)
 
-    def compact_text(value: str | None, limit: int = 180) -> str | None:
-        if not value:
-            return None
-        normalized = " ".join(str(value).split())
-        if len(normalized) <= limit:
-            return normalized
-        return f"{normalized[: limit - 3].rstrip()}..."
-
     def parse_bool_value(raw_value: str) -> bool | None:
         normalized = raw_value.strip().lower()
         if normalized in {"1", "true", "yes", "on", "enabled"}:
@@ -171,22 +163,21 @@ def register_commands(bot: RSSCordBot, settings: Settings) -> None:
         description = feed.description or derive_feed_description(parsed) or "No description available."
         recent_entries = bot.store.recent_entries(feed.id, limit=3, include_shorts=shorts_enabled())
 
-        lines = [
-            f"**{parsed.feed.get('title') or feed.title or 'Untitled feed'}**",
-            description,
-        ]
-        if recent_entries:
-            for index, entry in enumerate(recent_entries, start=1):
-                title = entry.entry_title or "Untitled article"
-                when = entry.published_at or entry.seen_at
-                if entry.entry_link:
-                    lines.append(f"{index}. {title} ({when})\n{entry.entry_link}")
-                else:
-                    lines.append(f"{index}. {title} ({when})")
-        else:
-            lines.append("No visible articles yet.")
+        await ctx.reply(
+            "\n\n".join(
+                [
+                    f"**{parsed.feed.get('title') or feed.title or 'Untitled feed'}**",
+                    description,
+                ]
+            ),
+            mention_author=False,
+        )
+        if not recent_entries:
+            await ctx.send("No visible articles yet.")
+            return
 
-        await ctx.reply("\n\n".join(lines), mention_author=False)
+        for entry in recent_entries:
+            await bot.send_entry(ctx, entry, feed_title=feed.title, fallback_url=feed.resolved_url)
 
     @bot.command(name="help")
     @owner_only(settings)
@@ -258,19 +249,9 @@ def register_commands(bot: RSSCordBot, settings: Settings) -> None:
             await ctx.reply("No matching visible items found.", mention_author=False)
             return
 
-        lines = []
-        for index, result in enumerate(results, start=1):
-            title = result.entry_title or "Untitled article"
-            channel_name = result.feed_title or "Unknown channel"
-            when = result.published_at or result.seen_at
-            lines.append(f"{index}. **{title}**")
-            lines.append(f"Channel: {channel_name}")
-            lines.append(f"When: {when}")
-            description = compact_text(result.entry_description)
-            if description:
-                lines.append(description)
-            if result.entry_link:
-                lines.append(result.entry_link)
-            lines.append("")
-
-        await ctx.reply("\n".join(lines[:-1]), mention_author=False)
+        await ctx.reply(
+            f"Found `{len(results)}` visible matching items.",
+            mention_author=False,
+        )
+        for result in results:
+            await bot.send_entry(ctx, result, feed_title=result.feed_title)
